@@ -75,7 +75,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 displayPressSelection(data.summary);
             } else {
                 state.isMultiPress = false;
-                await setupMainViewForSinglePress(data.sn);
+                state.pressData = {
+                    sn: data.sn,
+                    startTimes: data.startTimes,
+                    overallHealth: data.overallHealth,
+                    sessions: data.sessions 
+                };
+                setupMainView(data.sn, data.startTimes, data.overallHealth);
             }
         } catch (error) {
             uploadError.textContent = `Error: ${error.message}`;
@@ -93,8 +99,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${press.sn}</td>
                 <td>${press.cycles}</td>
                 <td>${press.scalingHealth}</td>
+                <td>${press.scalingHealthPercent}%</td>
                 <td>${press.gapHealth}</td>
+                <td>${press.gapHealthPercent}%</td>
                 <td>${press.overallHealth}</td>
+                <td>${press.overallHealthPercent}%</td>
             `;
             row.style.borderLeft = `5px solid var(--health-${press.color}, #ccc)`;
             pressTableBody.appendChild(row);
@@ -122,11 +131,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!selectedRow) return;
         const sn = selectedRow.dataset.sn;
         loader.style.display = 'block';
-        await setupMainViewForSinglePress(sn);
+        await setupMainViewForSelectedPress(sn);
         loader.style.display = 'none';
     });
     
-    const setupMainViewForSinglePress = async (sn) => {
+    const setupMainViewForSelectedPress = async (sn) => {
         try {
             const response = await fetch('/get_press_data', {
                 method: 'POST',
@@ -137,23 +146,35 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error(data.error);
 
             state.pressData = data;
-            
-            startTimeDropdown.innerHTML = '<option value="">Select a time...</option>';
-            Object.keys(data.startTimes).sort().forEach(st => {
-                const option = document.createElement('option');
-                option.value = st;
-                option.textContent = st;
-                startTimeDropdown.appendChild(option);
-            });
-            
-            setHealthLabel(overallHealthLabel, `Overall Health: ${data.overallHealth}`, data.overallHealth.toLowerCase());
-            mainInfoLabel.textContent = `Displaying Data for Press SN: ${sn}. Please select a Start Time.`;
-            document.getElementById('backToPressesBtn').style.display = state.isMultiPress ? 'inline-block' : 'none';
-            showView('mainApp');
+            setupMainView(sn, data.startTimes, data.overallHealth);
         } catch (error) {
             uploadError.textContent = `Error: ${error.message}`;
             showView('initial');
         }
+    };
+
+    const setupMainView = (sn, startTimes, overallHealth) => {
+        startTimeDropdown.innerHTML = '<option value="">Select a time...</option>';
+        const healthEmojiMap = {
+            green: '🟢',
+            gold: '🟡',
+            orange: '🟠',
+            red: '🔴',
+            grey: '⚪️'
+        };
+        
+        startTimes.forEach(st => {
+            const option = document.createElement('option');
+            option.value = st.short_time;
+            const emoji = healthEmojiMap[st.health_color] || '⚪️';
+            option.textContent = `${emoji} ${st.short_time} (${st.health_status})`;
+            startTimeDropdown.appendChild(option);
+        });
+        
+        setHealthLabel(overallHealthLabel, `Overall Health: ${overallHealth}`, overallHealth.toLowerCase());
+        mainInfoLabel.textContent = `Displaying Data for Press SN: ${sn}. Please select a Start Time.`;
+        document.getElementById('backToPressesBtn').style.display = state.isMultiPress ? 'inline-block' : 'none';
+        showView('mainApp');
     };
     
     document.getElementById('backToPressesBtn').addEventListener('click', () => {
@@ -210,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sessionData = state.pressData.sessions[selectedTime];
         
         const totalRows = sessionData.length;
-        const succeeded = sessionData.filter(r => r.statusforhistory.includes('Succeeded')).length;
+        const succeeded = sessionData.filter(r => r.statusforhistory && r.statusforhistory.includes('Succeeded')).length;
         const rate = totalRows > 0 ? (succeeded / totalRows) * 100 : 0;
         let healthText = "Error", color="red";
         if (rate >= 90) { healthText = "Excellent"; color="green"; }
@@ -241,7 +262,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const scalingLayout = { ...layout, title: 'Scaling Error Graph', yaxis: { title: 'Scaling Error (µm/m)', color: 'black' } };
         const plotData = [scalingTrace];
 
-        // CORRECTED: The is_top_plot condition is removed.
         if (trendsCheckbox.checked) {
             const trendTrace = { x: blanketIds, y: processedData.map(r => r.imagescalingusedupm + 14000), type: 'scatter', mode: 'lines', name: 'Normalized Trend', line: { color: desertColors.trend, dash: 'dot'}, yaxis: 'y2' };
             plotData.push(trendTrace);
