@@ -40,6 +40,14 @@ document.addEventListener('DOMContentLoaded', () => {
         element.dataset.color = color;
     };
 
+    const calculateStdDev = (arr) => {
+        if (!arr || arr.length === 0) return 0;
+        const n = arr.length;
+        const mean = arr.reduce((a, b) => a + b) / n;
+        const variance = arr.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / n;
+        return Math.sqrt(variance).toFixed(2);
+    };
+
     // --- Event Handlers ---
     fileInput.addEventListener('change', () => {
         if (fileInput.files.length > 0) {
@@ -49,7 +57,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     [...document.querySelectorAll('#loadNewFileBtn1, #loadNewFileBtn2')].forEach(btn => {
-        btn.addEventListener('click', () => window.location.reload());
+        btn.addEventListener('click', () => {
+             // Instead of reload, just trigger the file input
+             fileInput.click();
+        });
     });
     
     document.getElementById('exitButton').addEventListener('click', () => {
@@ -167,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const option = document.createElement('option');
             option.value = st.short_time;
             const emoji = healthEmojiMap[st.health_color] || '⚪️';
-            option.textContent = `${emoji} ${st.short_time} (${st.health_status})`;
+            option.textContent = `${emoji} ${st.short_time} (${st.health_status} - ${st.percent}%) [Cycles: ${st.cycles}]`;
             startTimeDropdown.appendChild(option);
         });
         
@@ -216,8 +227,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button class="app-button danger">Clear</button>
             </div>
             <div class="plot-graphs-area">
-                <div id="plotScaling-${selectedTime}" class="plot-graph"></div>
-                <div id="plotGap-${selectedTime}" class="plot-graph"></div>
+                 <div class="plot-wrapper">
+                    <div id="plotScaling-${selectedTime}" class="plot-graph"></div>
+                    <div class="std-dev-label" id="scalingStdDev-${selectedTime}"></div>
+                </div>
+                <div class="plot-wrapper">
+                    <div id="plotGap-${selectedTime}" class="plot-graph"></div>
+                    <div class="std-dev-label" id="gapStdDev-${selectedTime}"></div>
+                </div>
             </div>
         `;
         
@@ -248,8 +265,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 outlierLevel: outliersLevel.value
             })
         });
-        const processedData = await response.json();
+        const data = await response.json();
+        const processedData = data.plotData;
         const blanketIds = processedData.map(r => r.blanketid);
+
+        const scalingStdDevLabel = document.getElementById(`scalingStdDev-${selectedTime}`);
+        const gapStdDevLabel = document.getElementById(`gapStdDev-${selectedTime}`);
+        
+        scalingStdDevLabel.textContent = `STD error µm/m: ${data.scalingStdDev}`;
+        gapStdDevLabel.textContent = `STD error µm: ${data.gapStdDev}`;
 
         const desertColors = { scaling: '#D2B48C', gap: '#A0522D', trend: '#8F9779' };
         const layout = {
@@ -267,11 +291,29 @@ document.addEventListener('DOMContentLoaded', () => {
             plotData.push(trendTrace);
             scalingLayout.yaxis2 = { title: 'Normalized scaling µm/meter', overlaying: 'y', side: 'right', color: 'black' };
         }
-        Plotly.newPlot(`plotScaling-${selectedTime}`, plotData, scalingLayout, {responsive: true});
+        
+        const plotScalingDiv = document.getElementById(`plotScaling-${selectedTime}`);
+        Plotly.newPlot(plotScalingDiv, plotData, scalingLayout, {responsive: true});
 
         const gapTrace = { x: blanketIds, y: processedData.map(r => r.gaperrorfinalum), type: 'scatter', mode: 'lines', name: 'Gap Error', line: { color: desertColors.gap } };
         const gapLayout = { ...layout, title: 'Gap Error Graph', yaxis: { title: 'Gap Error (µm)', color: 'black' } };
-        Plotly.newPlot(`plotGap-${selectedTime}`, [gapTrace], gapLayout, {responsive: true});
+        
+        const plotGapDiv = document.getElementById(`plotGap-${selectedTime}`);
+        Plotly.newPlot(plotGapDiv, [gapTrace], gapLayout, {responsive: true});
+
+        plotScalingDiv.on('plotly_relayout', (eventData) => {
+            const xRange = eventData['xaxis.range'] || [Math.min(...blanketIds), Math.max(...blanketIds)];
+            const visibleData = processedData.filter(r => r.blanketid >= xRange[0] && r.blanketid <= xRange[1]);
+            const newStd = calculateStdDev(visibleData.map(r => r.imagescalingerrorupm));
+            scalingStdDevLabel.textContent = `STD error µm/m: ${newStd}`;
+        });
+
+         plotGapDiv.on('plotly_relayout', (eventData) => {
+            const xRange = eventData['xaxis.range'] || [Math.min(...blanketIds), Math.max(...blanketIds)];
+            const visibleData = processedData.filter(r => r.blanketid >= xRange[0] && r.blanketid <= xRange[1]);
+            const newStd = calculateStdDev(visibleData.map(r => r.gaperrorfinalum));
+            gapStdDevLabel.textContent = `STD error µm: ${newStd}`;
+        });
     }
     
     const _updateAllPlots = async () => {
