@@ -222,6 +222,11 @@ input[type="file"] {
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--border-color);
 }
+.plot-title-group {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
 .plot-title {
     font-size: 1.1rem;
     font-weight: 600;
@@ -230,8 +235,18 @@ input[type="file"] {
     display: flex;
     gap: 1rem;
 }
-.plot-graph {
+.plot-wrapper {
+    display: flex;
+    flex-direction: column;
     width: 50%;
+}
+.plot-graph {
+    width: 100%;
     min-height: 400px;
 }
-
+.std-dev-label {
+    text-align: center;
+    padding-top: 0.75rem; /* Changed from padding-bottom */
+    font-weight: bold;
+    color: #495057;
+}
