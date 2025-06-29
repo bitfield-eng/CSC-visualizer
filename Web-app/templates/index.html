@@ -3,23 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSC Visualizer</title>
+    <title>CSC Visualizer v{{ version }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <!-- Plotly.js for interactive graphs -->
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 </head>
 <body>
 
-    <!-- === Persistent Top Bar === -->
     <header class="persistent-header">
         <h1>CSC Visualizer</h1>
         <button id="exitButton" class="header-button">Exit</button>
     </header>
 
-    <!-- === Main Content Area === -->
     <div class="content-area">
-
-        <!-- === Initial View === -->
         <div id="initialView" class="view">
             <div class="upload-box">
                 <h2>Welcome</h2>
@@ -32,27 +27,19 @@
             </div>
         </div>
 
-        <!-- === Multi-Press Selection View === -->
         <div id="pressSelectionView" class="view" style="display: none;">
             <h2>Multiple Presses Detected</h2>
-            <p>Please select a press by clicking a row and then the button, or by double-clicking a row.</p>
+            <p>Please select a press by clicking a row, then the button, or by double-clicking a row.</p>
             <div class="table-container">
                 <table id="pressTable">
                     <thead>
                         <tr>
-                            <th>Press SN</th>
-                            <th>Blanket Printing Cycles</th>
-                            <th>Scaling Health</th>
-                            <th>Scaling Success %</th>
-                            <th>Gap Health</th>
-                            <th>Gap Success %</th>
-                            <th>Overall Health</th>
-                            <th>Overall Success %</th>
+                            <th>Press SN</th><th>Blanket Printing Cycles</th><th>Scaling Health</th>
+                            <th>Scaling Success %</th><th>Gap Health</th><th>Gap Success %</th>
+                            <th>Overall Health</th><th>Overall Success %</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <!-- Rows will be inserted by JavaScript -->
-                    </tbody>
+                    <tbody></tbody>
                 </table>
             </div>
             <div class="button-container">
@@ -61,42 +48,36 @@
             </div>
         </div>
 
-        <!-- === Main Application View === -->
         <div id="mainAppView" class="view" style="display: none;">
-            <!-- Controls Bar -->
             <div class="controls-bar">
                 <button id="loadNewFileBtn2" class="app-button">Load New File</button>
                 <button id="backToPressesBtn" class="app-button" style="display: none;">&lt; Back to Press List</button>
                 <div class="control-group">
-                    <label>Select Start Time:</label>
+                    <label for="startTimeDropdown">Select Start Time:</label>
                     <select id="startTimeDropdown"></select>
                 </div>
-                <div class="control-group">
-                    <label id="blanketIdLabel"></label>
-                </div>
+                <div class="control-group"><label id="blanketIdLabel"></label></div>
                 <div class="control-group">
                     <input type="checkbox" id="outliersCheckbox" checked>
                     <label for="outliersCheckbox">Remove outliers</label>
                     <label for="outliersLevel">Level:</label>
-                    <input type="number" id="outliersLevel" min="1" max="20" value="1">
+                    <input type="number" id="outliersLevel" min="1" max="20" value="1" style="width: 50px;">
                 </div>
                  <div class="control-group">
                     <input type="checkbox" id="trendsCheckbox">
                     <label for="trendsCheckbox">Show trends</label>
                 </div>
                 <div class="control-group push-right">
+                    <button id="showErrorStatsBtn" class="app-button">Show Error Stats</button>
                     <button id="clearAllBtn" class="app-button danger">Clear All Graphs</button>
                 </div>
             </div>
-            <!-- Info Bar -->
             <div class="info-bar">
                 <span id="overallHealthLabel" class="health-label"></span>
                 <span id="mainInfoLabel"></span>
             </div>
-            <!-- Plots Area -->
-            <div id="plotsContainer" class="plots-container">
-                <!-- Plot frames will be inserted here -->
-            </div>
+            <div id="plotsContainer" class="plots-container"></div>
+            <div id="errorStatsContainer" class="plots-container" style="display: none;"></div>
         </div>
     </div>
     
