@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let state = {
         filename: null,
         pressData: null,
+        currentSessionData: null,
         isMultiPress: false,
     };
 
@@ -26,102 +27,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const outliersCheckbox = document.getElementById('outliersCheckbox');
     const outliersLevel = document.getElementById('outliersLevel');
     const trendsCheckbox = document.getElementById('trendsCheckbox');
+    const showErrorStatsBtn = document.getElementById('showErrorStatsBtn');
+    const errorStatsContainer = document.getElementById('errorStatsContainer');
 
     // --- Utility Functions ---
     const showView = (viewName) => {
         Object.values(views).forEach(v => v.style.display = 'none');
-        views[viewName].style.display = 'block';
+        if (views[viewName]) {
+            views[viewName].style.display = 'block';
+        }
     };
-    
+
     const setHealthLabel = (element, healthText, color) => {
         element.textContent = healthText;
         element.style.backgroundColor = `var(--health-${color}, #6c757d)`;
         element.style.color = (color === 'gold') ? 'black' : 'white';
-        element.dataset.color = color;
     };
 
-    const calculateStdDev = (arr) => {
-        if (!arr || arr.length === 0) return 0;
-        const n = arr.length;
-        const mean = arr.reduce((a, b) => a + b) / n;
-        const variance = arr.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / n;
-        return Math.sqrt(variance).toFixed(2);
-    };
-
-    // --- Event Handlers ---
-    fileInput.addEventListener('change', () => {
-        if (fileInput.files.length > 0) {
-            fileNameLabel.textContent = fileInput.files[0].name;
-            handleFileUpload();
+    // --- Event Listeners ---
+    fileInput.addEventListener('change', (event) => {
+        if (event.target.files.length > 0) {
+            fileNameLabel.textContent = event.target.files[0].name;
+            handleFileUpload(event.target.files[0]);
         }
     });
-    
+
     [...document.querySelectorAll('#loadNewFileBtn1, #loadNewFileBtn2')].forEach(btn => {
-        btn.addEventListener('click', () => {
-             // Instead of reload, just trigger the file input
-             fileInput.click();
-        });
+        btn.addEventListener('click', () => fileInput.click());
     });
-    
+
     document.getElementById('exitButton').addEventListener('click', () => {
-        document.body.innerHTML = '<h1 style="text-align: center; margin-top: 5rem;">Application Closed</h1><p style="text-align: center;">You can close this browser tab.</p>';
+        if (confirm("Are you sure? This will reset the application.")) {
+            window.location.reload();
+        }
     });
 
-    const handleFileUpload = async () => {
-        loader.style.display = 'block';
-        uploadError.textContent = '';
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
-
-        try {
-            const response = await fetch('/upload', { method: 'POST', body: formData });
-            const data = await response.json();
-
-            if (!response.ok) throw new Error(data.error || 'Unknown error occurred.');
-
-            state.filename = data.filename;
-
-            if (data.view === 'multi_press') {
-                state.isMultiPress = true;
-                displayPressSelection(data.summary);
-            } else {
-                state.isMultiPress = false;
-                state.pressData = {
-                    sn: data.sn,
-                    startTimes: data.startTimes,
-                    overallHealth: data.overallHealth,
-                    sessions: data.sessions 
-                };
-                setupMainView(data.sn, data.startTimes, data.overallHealth);
-            }
-        } catch (error) {
-            uploadError.textContent = `Error: ${error.message}`;
-        } finally {
-            loader.style.display = 'none';
-        }
-    };
-
-    const displayPressSelection = (summary) => {
-        pressTableBody.innerHTML = '';
-        summary.forEach(press => {
-            const row = document.createElement('tr');
-            row.dataset.sn = press.sn;
-            row.innerHTML = `
-                <td>${press.sn}</td>
-                <td>${press.cycles}</td>
-                <td>${press.scalingHealth}</td>
-                <td>${press.scalingHealthPercent}%</td>
-                <td>${press.gapHealth}</td>
-                <td>${press.gapHealthPercent}%</td>
-                <td>${press.overallHealth}</td>
-                <td>${press.overallHealthPercent}%</td>
-            `;
-            row.style.borderLeft = `5px solid var(--health-${press.color}, #ccc)`;
-            pressTableBody.appendChild(row);
-        });
-        showView('pressSelection');
-    };
-    
     pressTableBody.addEventListener('click', (e) => {
         const row = e.target.closest('tr');
         if (!row) return;
@@ -133,20 +73,85 @@ document.addEventListener('DOMContentLoaded', () => {
     pressTableBody.addEventListener('dblclick', (e) => {
         const row = e.target.closest('tr');
         if (!row) return;
-        viewPressDataBtn.disabled = false;
+        row.classList.add('selected');
         viewPressDataBtn.click();
     });
 
-    viewPressDataBtn.addEventListener('click', async () => {
+    viewPressDataBtn.addEventListener('click', () => {
         const selectedRow = document.querySelector('#pressTable tbody tr.selected');
         if (!selectedRow) return;
         const sn = selectedRow.dataset.sn;
-        loader.style.display = 'block';
-        await setupMainViewForSelectedPress(sn);
-        loader.style.display = 'none';
+        fetchPressData(sn);
     });
-    
-    const setupMainViewForSelectedPress = async (sn) => {
+
+    startTimeDropdown.addEventListener('change', updateDisplay);
+    [outliersCheckbox, outliersLevel, trendsCheckbox].forEach(el => {
+        el.addEventListener('change', updateDisplay);
+    });
+
+    showErrorStatsBtn.addEventListener('click', () => {
+        const container = errorStatsContainer;
+        if (container.style.display === 'block') {
+            container.style.display = 'none';
+        } else {
+            updateErrorStats();
+        }
+    });
+
+    document.getElementById('clearAllBtn').addEventListener('click', () => {
+        plotsContainer.innerHTML = '';
+        errorStatsContainer.style.display = 'none';
+    });
+
+
+    // --- Core Logic ---
+    async function handleFileUpload(file) {
+        loader.style.display = 'block';
+        uploadError.textContent = '';
+        showView('initial');
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/upload', { method: 'POST', body: formData });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+
+            state.filename = data.filename;
+            if (data.view === 'multi_press') {
+                state.isMultiPress = true;
+                displayPressSelection(data.summary);
+            } else {
+                state.isMultiPress = false;
+                await fetchPressData(data.sn);
+            }
+        } catch (error) {
+            uploadError.textContent = `Error: ${error.message}`;
+        } finally {
+            loader.style.display = 'none';
+        }
+    }
+
+    function displayPressSelection(summary) {
+        pressTableBody.innerHTML = '';
+        summary.forEach(press => {
+            const row = document.createElement('tr');
+            row.dataset.sn = press.sn;
+            row.innerHTML = `
+                <td>${press.sn}</td> <td>${press.cycles}</td>
+                <td>${press.scalingHealth}</td> <td>${press.scalingHealthPercent}%</td>
+                <td>${press.gapHealth}</td> <td>${press.gapHealthPercent}%</td>
+                <td>${press.overallHealth}</td> <td>${press.overallHealthPercent}%</td>`;
+            row.style.borderLeft = `5px solid var(--health-${press.color}, #ccc)`;
+            pressTableBody.appendChild(row);
+        });
+        showView('pressSelection');
+    }
+
+    async function fetchPressData(sn) {
+        loader.style.display = 'block';
+        showView('initial');
         try {
             const response = await fetch('/get_press_data', {
                 method: 'POST',
@@ -157,168 +162,174 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error(data.error);
 
             state.pressData = data;
-            setupMainView(sn, data.startTimes, data.overallHealth);
+            setupMainViewUI(sn);
+            showView('mainApp');
         } catch (error) {
             uploadError.textContent = `Error: ${error.message}`;
             showView('initial');
+        } finally {
+            loader.style.display = 'none';
         }
-    };
+    }
 
-    const setupMainView = (sn, startTimes, overallHealth) => {
-        startTimeDropdown.innerHTML = '<option value="">Select a time...</option>';
-        const healthEmojiMap = {
-            green: '🟢',
-            gold: '🟡',
-            orange: '🟠',
-            red: '🔴',
-            grey: '⚪️'
-        };
+    function setupMainViewUI(sn) {
+        const { startTimes, overallHealth } = state.pressData;
+        startTimeDropdown.innerHTML = '';
+        const healthEmojiMap = { green: '🟢', gold: '🟡', orange: '🟠', red: '🔴', grey: '⚪️' };
         
         startTimes.forEach(st => {
             const option = document.createElement('option');
             option.value = st.short_time;
             const emoji = healthEmojiMap[st.health_color] || '⚪️';
-            option.textContent = `${emoji} ${st.short_time} (${st.health_status} - ${st.percent}%) [Cycles: ${st.cycles}]`;
+            option.textContent = `${emoji} ${st.short_time} (${st.health_status} - ${st.percent}%)`;
             startTimeDropdown.appendChild(option);
         });
-        
+
         setHealthLabel(overallHealthLabel, `Overall Health: ${overallHealth}`, overallHealth.toLowerCase());
-        mainInfoLabel.textContent = `Displaying Data for Press SN: ${sn}. Please select a Start Time.`;
+        mainInfoLabel.textContent = `Displaying Data for Press SN: ${sn}.`;
         document.getElementById('backToPressesBtn').style.display = state.isMultiPress ? 'inline-block' : 'none';
-        showView('mainApp');
-    };
-    
-    document.getElementById('backToPressesBtn').addEventListener('click', () => {
-        plotsContainer.innerHTML = '';
-        showView('pressSelection');
-    });
-    
-    startTimeDropdown.addEventListener('change', async () => {
+        
+        // Trigger update for the first session
+        updateDisplay();
+    }
+
+    async function updateDisplay() {
         const selectedTime = startTimeDropdown.value;
-        if (!selectedTime) return;
-        
-        const sessionInfo = state.pressData.sessions[selectedTime][0] || {};
-        blanketIdLabel.textContent = `Blanket Cycles: ${Math.max(...state.pressData.sessions[selectedTime].map(r => r.blanketid))}`;
-        mainInfoLabel.textContent = `Press SN: ${state.pressData.sn} | Start Time: ${selectedTime} | Substrate: ${sessionInfo.substratename}`;
-        
-        await renderPlot(selectedTime);
-    });
-    
-    [outliersCheckbox, outliersLevel, trendsCheckbox].forEach(el => {
-        el.addEventListener('change', () => {
-             _updateAllPlots();
-        });
-    });
-    
-    document.getElementById('clearAllBtn').addEventListener('click', () => {
-        plotsContainer.innerHTML = '';
-    });
-
-    const renderPlot = async (selectedTime) => {
-        const plotFrame = document.createElement('div');
-        plotFrame.classList.add('plot-frame');
-        plotFrame.dataset.time = selectedTime;
-        plotFrame.innerHTML = `
-            <div class="plot-header">
-                <div class="plot-title-group">
-                    <span class="plot-title">Session: ${selectedTime}</span>
-                    <span class="health-label" id="sessionHealth-${selectedTime}"></span>
-                </div>
-                <button class="app-button danger">Clear</button>
-            </div>
-            <div class="plot-graphs-area">
-                 <div class="plot-wrapper">
-                    <div id="plotScaling-${selectedTime}" class="plot-graph"></div>
-                    <div class="std-dev-label" id="scalingStdDev-${selectedTime}"></div>
-                </div>
-                <div class="plot-wrapper">
-                    <div id="plotGap-${selectedTime}" class="plot-graph"></div>
-                    <div class="std-dev-label" id="gapStdDev-${selectedTime}"></div>
-                </div>
-            </div>
-        `;
-        
-        plotFrame.querySelector('button.danger').addEventListener('click', () => plotFrame.remove());
-        plotsContainer.prepend(plotFrame);
-        await redrawPlot(plotFrame);
-    };
-
-    const redrawPlot = async (plotFrame) => {
-        const selectedTime = plotFrame.dataset.time;
-        const sessionData = state.pressData.sessions[selectedTime];
-        
-        const totalRows = sessionData.length;
-        const succeeded = sessionData.filter(r => r.statusforhistory && r.statusforhistory.includes('Succeeded')).length;
-        const rate = totalRows > 0 ? (succeeded / totalRows) * 100 : 0;
-        let healthText = "Error", color="red";
-        if (rate >= 90) { healthText = "Excellent"; color="green"; }
-        else if (rate >= 75) { healthText = "Good"; color="gold"; }
-        else if (rate >= 40) { healthText = "Warning"; color="orange"; }
-        setHealthLabel(plotFrame.querySelector('.health-label'), `Session Health: ${healthText}`, color);
-
-        const response = await fetch('/process_data', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                sessionData: sessionData,
-                removeOutliers: outliersCheckbox.checked,
-                outlierLevel: outliersLevel.value
-            })
-        });
-        const data = await response.json();
-        const processedData = data.plotData;
-        const blanketIds = processedData.map(r => r.blanketid);
-
-        const scalingStdDevLabel = document.getElementById(`scalingStdDev-${selectedTime}`);
-        const gapStdDevLabel = document.getElementById(`gapStdDev-${selectedTime}`);
-        
-        scalingStdDevLabel.textContent = `STD error µm/m: ${data.scalingStdDev}`;
-        gapStdDevLabel.textContent = `STD error µm: ${data.gapStdDev}`;
-
-        const desertColors = { scaling: '#D2B48C', gap: '#A0522D', trend: '#8F9779' };
-        const layout = {
-            margin: { t: 40, b: 40, l: 60, r: 60 },
-            xaxis: { title: 'Blanket ID' },
-            legend: { x: 0, y: 1.1, orientation: 'h' }
-        };
-        
-        const scalingTrace = { x: blanketIds, y: processedData.map(r => r.imagescalingerrorupm), type: 'scatter', mode: 'lines', name: 'Scaling Error', line: { color: desertColors.scaling } };
-        const scalingLayout = { ...layout, title: 'Scaling Error Graph', yaxis: { title: 'Scaling Error (µm/m)', color: 'black' } };
-        const plotData = [scalingTrace];
-
-        if (trendsCheckbox.checked) {
-            const trendTrace = { x: blanketIds, y: processedData.map(r => r.imagescalingusedupm + 14000), type: 'scatter', mode: 'lines', name: 'Normalized Trend', line: { color: desertColors.trend, dash: 'dot'}, yaxis: 'y2' };
-            plotData.push(trendTrace);
-            scalingLayout.yaxis2 = { title: 'Normalized scaling µm/meter', overlaying: 'y', side: 'right', color: 'black' };
+        if (!selectedTime || !state.pressData) {
+            plotsContainer.innerHTML = '';
+            errorStatsContainer.style.display = 'none';
+            return;
         }
-        
-        const plotScalingDiv = document.getElementById(`plotScaling-${selectedTime}`);
-        Plotly.newPlot(plotScalingDiv, plotData, scalingLayout, {responsive: true});
 
-        const gapTrace = { x: blanketIds, y: processedData.map(r => r.gaperrorfinalum), type: 'scatter', mode: 'lines', name: 'Gap Error', line: { color: desertColors.gap } };
-        const gapLayout = { ...layout, title: 'Gap Error Graph', yaxis: { title: 'Gap Error (µm)', color: 'black' } };
-        
-        const plotGapDiv = document.getElementById(`plotGap-${selectedTime}`);
-        Plotly.newPlot(plotGapDiv, [gapTrace], gapLayout, {responsive: true});
+        plotsContainer.innerHTML = `<div class="loader"></div>`;
+        errorStatsContainer.style.display = 'none';
 
-        plotScalingDiv.on('plotly_relayout', (eventData) => {
-            const xRange = eventData['xaxis.range'] || [Math.min(...blanketIds), Math.max(...blanketIds)];
-            const visibleData = processedData.filter(r => r.blanketid >= xRange[0] && r.blanketid <= xRange[1]);
-            const newStd = calculateStdDev(visibleData.map(r => r.imagescalingerrorupm));
-            scalingStdDevLabel.textContent = `STD error µm/m: ${newStd}`;
-        });
+        const sessionData = state.pressData.sessions[selectedTime];
+        state.currentSessionData = sessionData; // Save current session data
+        const sessionInfo = sessionData[0] || {};
+        blanketIdLabel.textContent = `Blanket Cycles: ${Math.max(...sessionData.map(r => r.blanketid))}`;
 
-         plotGapDiv.on('plotly_relayout', (eventData) => {
-            const xRange = eventData['xaxis.range'] || [Math.min(...blanketIds), Math.max(...blanketIds)];
-            const visibleData = processedData.filter(r => r.blanketid >= xRange[0] && r.blanketid <= xRange[1]);
-            const newStd = calculateStdDev(visibleData.map(r => r.gaperrorfinalum));
-            gapStdDevLabel.textContent = `STD error µm: ${newStd}`;
-        });
+        try {
+            const response = await fetch('/process_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sessionData: sessionData,
+                    removeOutliers: outliersCheckbox.checked,
+                    outlierLevel: outliersLevel.value
+                })
+            });
+            const data = await response.json();
+            const processedData = data.plotData;
+            const blanketIds = processedData.map(r => r.blanketid);
+
+            plotsContainer.innerHTML = `
+                <div class="plot-frame">
+                    <div class="plot-graphs-area">
+                        <div class="plot-wrapper">
+                            <div id="plotScaling" class="plot-graph"></div>
+                            <div class="std-dev-label">STD error µm/m: ${data.scalingStdDev}</div>
+                        </div>
+                        <div class="plot-wrapper">
+                            <div id="plotGap" class="plot-graph"></div>
+                            <div class="std-dev-label">STD error µm: ${data.gapStdDev}</div>
+                        </div>
+                    </div>
+                </div>`;
+            
+            const layout = { margin: { t: 40, b: 40, l: 60, r: 60 }, xaxis: { title: 'Blanket ID' } };
+            const scalingTrace = { x: blanketIds, y: processedData.map(r => r.imagescalingerrorupm), name: 'Scaling Error', line: { color: '#D2B48C' } };
+            const scalingLayout = { ...layout, title: 'Scaling Error Graph', yaxis: { title: 'Scaling Error (µm/m)' } };
+            
+            const plotDataScaling = [scalingTrace];
+            if (trendsCheckbox.checked) {
+                const trendTrace = { x: blanketIds, y: processedData.map(r => r.imagescalingusedupm + 14000), name: 'Normalized Trend', line: { color: '#8F9779', dash: 'dot'}, yaxis: 'y2' };
+                plotDataScaling.push(trendTrace);
+                scalingLayout.yaxis2 = { title: 'Normalized scaling µm/meter', overlaying: 'y', side: 'right' };
+            }
+            Plotly.newPlot('plotScaling', plotDataScaling, scalingLayout, {responsive: true});
+
+            const gapTrace = { x: blanketIds, y: processedData.map(r => r.gaperrorfinalum), name: 'Gap Error', line: { color: '#A0522D' } };
+            const gapLayout = { ...layout, title: 'Gap Error Graph', yaxis: { title: 'Gap Error (µm)' } };
+            Plotly.newPlot('plotGap', [gapTrace], gapLayout, {responsive: true});
+
+        } catch (error) {
+            plotsContainer.innerHTML = `<div class="error-message">Failed to render plots: ${error.message}</div>`;
+        }
     }
     
-    const _updateAllPlots = async () => {
-        for (const frame of plotsContainer.querySelectorAll('.plot-frame')) {
-            await redrawPlot(frame);
+    async function updateErrorStats() {
+        if (!state.currentSessionData) return;
+        errorStatsContainer.innerHTML = `<div class="loader"></div>`;
+        errorStatsContainer.style.display = 'block';
+
+        try {
+            const response = await fetch('/api/error_stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionData: state.currentSessionData })
+            });
+            const data = await response.json();
+            
+            errorStatsContainer.innerHTML = `
+                <div class="plot-frame">
+                    <h3 class="plot-title">Error Statistics</h3>
+                    <div class="plot-graphs-area">
+                        <div class="plot-wrapper"><div id="scalingStatusPlot" class="plot-graph"></div></div>
+                        <div class="plot-wrapper"><div id="gapStatusPlot" class="plot-graph"></div></div>
+                    </div>
+                    <div class="legend-box" id="legendBox"></div>
+                </div>`;
+
+            renderBarPlot('scalingStatusPlot', 'Scaling Status', data.scalingStats);
+            renderBarPlot('gapStatusPlot', 'Gap Status', data.gapStats);
+
+        } catch (error) {
+            errorStatsContainer.innerHTML = `<div class="error-message">Failed to render error stats: ${error.message}</div>`;
         }
-    };
+    }
+    
+    function renderBarPlot(divId, title, stats) {
+        const succeeded = { 'Succeeded': stats['Succeeded'] || 0 };
+        delete stats['Succeeded'];
+        const others = stats;
+
+        const legend = {};
+        const otherLabels = Object.keys(others).map((key, i) => {
+            const numLabel = `[${i+1}]`;
+            legend[numLabel] = key;
+            return numLabel;
+        });
+
+        const trace1 = { x: ['Succeeded'], y: [succeeded['Succeeded']], type: 'bar', name: 'Succeeded', marker: { color: 'var(--health-green)' } };
+        const trace2 = { x: otherLabels, y: Object.values(others), type: 'bar', name: 'Others', marker: { color: 'var(--primary-color)' }, yaxis: 'y2' };
+
+        const layout = {
+            title: title,
+            margin: { t: 40, b: 40, l: 60, r: 60 },
+            xaxis: { automargin: true },
+            yaxis: { title: 'Succeeded Count', type: 'log', automargin: true },
+            yaxis2: { title: 'Other Statuses Count', overlaying: 'y', side: 'right', automargin: true, showgrid: false },
+            showlegend: false
+        };
+        Plotly.newPlot(divId, [trace1, trace2], layout, {responsive: true});
+
+        const legendBox = document.getElementById('legendBox');
+        let legendHTML = `<h4>${title} Legend</h4>`;
+        if (Object.keys(legend).length === 0) {
+            legendHTML += 'No other statuses to report.';
+        } else {
+            for(const [key, value] of Object.entries(legend)) {
+                legendHTML += `<div><strong>${key}:</strong> ${value}</div>`;
+            }
+        }
+        
+        const legendDiv = document.createElement('div');
+        legendDiv.id = `legend-${divId}`;
+        const oldLegend = document.getElementById(legendDiv.id);
+        if(oldLegend) oldLegend.remove();
+        
+        legendDiv.innerHTML = legendHTML;
+        legendBox.appendChild(legendDiv);
+    }
 });
